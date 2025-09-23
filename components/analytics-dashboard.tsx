@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Plot from "react-plotly.js";
 import { AssistantBubble } from "@/components/ui/assistant-bubble";
 import dynamic from "next/dynamic";
 import {

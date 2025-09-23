@@ -12,6 +12,13 @@ import math
 
 app = FastAPI(title="Quant Backend")
 
+@app.get("/")
+def root():
+    return {"message": "API is live"}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -379,4 +386,5 @@ def api_excel(body: SummaryIn):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
+
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")

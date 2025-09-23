@@ -42,6 +42,9 @@ The app lets you pick two stocks, analyze how closely they move together, and ba
 
 ---
 
+<img width="1283" height="687" alt="image" src="https://github.com/user-attachments/assets/5eaf3656-9132-4a44-882f-89e8784df480" />
+
+
 ## How It Works
 
 1. Select a pair of stocks and time range.  

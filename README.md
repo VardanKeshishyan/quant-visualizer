@@ -2,6 +2,7 @@
 
 Quant Visualizer is a web application that demonstrates one of the classic quantitative finance ideas — **pairs trading**.  
 The app lets you pick two stocks, analyze how closely they move together, and backtest a simple long/short strategy.
+<img width="1895" height="1042" alt="image" src="https://github.com/user-attachments/assets/928c45b1-f80e-4fe8-9046-1339a43e5e2a" />
 
 ---
 

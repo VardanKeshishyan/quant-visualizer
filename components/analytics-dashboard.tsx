@@ -23,7 +23,6 @@ import { runSummary, downloadExcel } from "@/lib/api";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
-/** Recommended stock pairs (Auto mode) */
 const stockPairs = [
   ["NVDA","AMD"],["INTC","AMD"],["AVGO","QCOM"],["MU","WDC"],
   ["GOOGL","META"],["MSFT","ORCL"],["V","MA"],["JPM","BAC"],

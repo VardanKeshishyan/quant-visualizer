@@ -1,6 +1,6 @@
 # Quant Visualizer
 
-Quant Visualizer is a web application that demonstrates one of the classic quantitative finance ideas — **pairs trading**.  
+Quant Visualizer is a web application that demonstrates one of the classic quantitative finance ideas **pairs trading**.  
 The app lets you pick two stocks, analyze how closely they move together, and backtest a simple long/short strategy.
 
 

@@ -29,6 +29,9 @@ The app lets you pick two stocks, analyze how closely they move together, and ba
 - **AI Assistant**  
   A small floating chatbot that answers questions about the tool, the charts, and pairs trading in plain language.
 
+
+<img width="1395" height="742" alt="image" src="https://github.com/user-attachments/assets/6f0cef56-d777-47aa-acad-c33eab5def07" />
+
 ---
 
 ## Tech Stack

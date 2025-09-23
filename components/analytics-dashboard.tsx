@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { runSummary, downloadExcel } from "@/lib/api";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as any;
 
 const stockPairs = [
   ["NVDA","AMD"],["INTC","AMD"],["AVGO","QCOM"],["MU","WDC"],

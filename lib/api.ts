@@ -1,5 +1,5 @@
 
-export const BACKEND = "/py"; 
+export const BACKEND = "https://quant-visualizer-6.onrender.com/"; 
 
 export type SummaryPayload = {
   ticker1: string;
@@ -67,3 +67,4 @@ export async function askAssistant(payload: { message: string; context?: any }) 
   }
   return (await r.json()) as { text: string };
 }
+

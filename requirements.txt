@@ -3,7 +3,9 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pydantic==2.9.1
 
-yfinance==0.2.33
+# yfinance BEFORE it added the peewee dependency
+yfinance==0.2.18
+
 plotly==5.23.0
 openpyxl==3.1.5
 python-dateutil==2.9.0.post0

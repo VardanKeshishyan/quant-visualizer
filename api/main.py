@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 
 import pandas as pd
 import numpy as np
@@ -22,6 +23,9 @@ async def assistant(request: Request):
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    return JSONResponse(content={"message": "CORS preflight OK"})
 
 @app.get("/health")
 def health():
@@ -397,6 +401,7 @@ def api_excel(body: SummaryIn):
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 
 
 

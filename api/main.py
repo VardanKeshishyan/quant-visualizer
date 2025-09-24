@@ -23,9 +23,6 @@ async def assistant(request: Request):
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str):
-    return JSONResponse(content={"message": "CORS preflight OK"})
 
 @app.get("/health")
 def health():
@@ -33,13 +30,15 @@ def health():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       
+    allow_origins=["*"],         
     allow_credentials=True,
-    allow_methods=["*"],      
-    allow_headers=["*"],    
+    allow_methods=["*"],         
+    allow_headers=["*"],
 )
 
-
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    return JSONResponse(content={"ok": True})
 
 
 class SummaryIn(BaseModel):
@@ -401,6 +400,7 @@ def api_excel(body: SummaryIn):
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 
 
 

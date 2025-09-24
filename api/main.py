@@ -1,5 +1,5 @@
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
@@ -17,7 +17,8 @@ def root():
     return {"message": "API is live"}
     
 @app.post("/api/assistant")
-def assistant(payload: dict):
+async def assistant(request: Request):
+    payload = await request.json()
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
@@ -399,5 +400,6 @@ def api_excel(body: SummaryIn):
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 
 

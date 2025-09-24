@@ -1,4 +1,3 @@
-
 export const BACKEND = "https://quant-visualizer-6.onrender.com"; 
 
 export type SummaryPayload = {
@@ -11,7 +10,6 @@ export type SummaryPayload = {
 
 async function readError(r: Response) {
   const txt = await r.text();
-  
   try {
     const j = JSON.parse(txt);
     if (j?.detail) return `${r.status} ${r.statusText} — ${j.detail}`;
@@ -25,9 +23,7 @@ export async function runSummary(p: SummaryPayload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(p),
   });
-  if (!r.ok) {
-    throw new Error(await readError(r));
-  }
+  if (!r.ok) throw new Error(await readError(r));
   return r.json();
 }
 
@@ -37,9 +33,8 @@ export async function downloadExcel(p: SummaryPayload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(p),
   });
-  if (!r.ok) {
-    throw new Error(await readError(r));
-  }
+  if (!r.ok) throw new Error(await readError(r));
+
   const blob = await r.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -49,10 +44,8 @@ export async function downloadExcel(p: SummaryPayload) {
   URL.revokeObjectURL(a.href);
 }
 
-
-
 export async function askAssistant(payload: { message: string; context?: any }) {
-  const r = await fetch(`/api/assistant`, {
+  const r = await fetch(`${BACKEND}/api/assistant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -67,5 +60,3 @@ export async function askAssistant(payload: { message: string; context?: any }) 
   }
   return (await r.json()) as { text: string };
 }
-
-

@@ -29,16 +29,12 @@ def health():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://quant-visualizer-o284i2lr1-vardans-projects-86e1838b.vercel.app",
-        "https://quant-visualizer-l4o9aob89-vardans-projects-86e1838b.vercel.app",
-    ],
+    allow_origins=["*"],       
     allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"],
+    allow_methods=["*"],      
+    allow_headers=["*"],    
 )
+
 
 
 
@@ -401,6 +397,7 @@ def api_excel(body: SummaryIn):
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 
 
 

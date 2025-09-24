@@ -1,11 +1,11 @@
-export const BACKEND = "https://quant-visualizer-6.onrender.com"; 
+export const BACKEND = "https://quant-visualizer-6.onrender.com";
 
 export type SummaryPayload = {
   ticker1: string;
   ticker2: string;
-  start_date: string;
-  end_date: string;
-  initial_invest: number;
+  start_date: string;      // "YYYY-MM-DD"
+  end_date: string;        // "YYYY-MM-DD"
+  initial_invest: number;  // make sure it's a number, not string
 };
 
 async function readError(r: Response) {
@@ -45,7 +45,8 @@ export async function downloadExcel(p: SummaryPayload) {
 }
 
 export async function askAssistant(payload: { message: string; context?: any }) {
-  const r = await fetch(`${BACKEND}/api/assistant`, {
+  // IMPORTANT: Keep this on Next.js (your Vercel function), not the Python backend
+  const r = await fetch(`/api/assistant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

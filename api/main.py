@@ -15,6 +15,12 @@ app = FastAPI(title="Quant Backend")
 @app.get("/")
 def root():
     return {"message": "API is live"}
+    
+@app.post("/api/assistant")
+def assistant(payload: dict):
+    msg = payload.get("message", "")
+    return {"text": f"(Echo) You said: {msg}"}
+
 
 @app.get("/health")
 def health():
@@ -393,4 +399,5 @@ def api_excel(body: SummaryIn):
     except Exception as e:
 
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 

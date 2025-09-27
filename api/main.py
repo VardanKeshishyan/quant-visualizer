@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
-
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -11,23 +10,25 @@ import math
 
 app = FastAPI(title="Quant Backend")
 
-# ----- CORS -----
-# Allow localhost and all *.vercel.app (plus your exact deployed URL if you want to be strict)
+# ---------- CORS ----------
+# Allow localhost and your Vercel deployment(s).
+# Remove the regex if you want to lock it to your exact URL only.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        # add your exact Vercel site if you prefer strict allowlist:
-        # "https://quant-visualizer-XXXXX.vercel.app",
+        "https://quant-visualizer.vercel.app",
+        # add any other exact Vercel preview URL if you want to be strict
+        # "https://quant-visualizer-xxxxxxxx.vercel.app",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",   # allows any vercel.app frontend
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----- Health / Root -----
+# ---------- Health / Root ----------
 @app.get("/")
 def root():
     return {"message": "API is live"}
@@ -36,14 +37,14 @@ def root():
 def health():
     return {"status": "ok"}
 
-# ----- Assistant echo (simple placeholder) -----
+# ---------- Assistant (echo) ----------
 @app.post("/api/assistant")
 async def assistant(request: Request):
     payload = await request.json()
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
-# ----- Models -----
+# ---------- Models ----------
 class SummaryIn(BaseModel):
     ticker1: str = Field(..., examples=["NVDA"])
     ticker2: str = Field(..., examples=["AMD"])
@@ -51,7 +52,7 @@ class SummaryIn(BaseModel):
     end_date: str = Field(..., examples=["2024-01-01"])
     initial_invest: float = 1000.0
 
-# ----- Helpers -----
+# ---------- Helpers ----------
 def _clean_json(x):
     if isinstance(x, float):
         return None if (math.isnan(x) or math.isinf(x)) else float(x)
@@ -71,7 +72,8 @@ def _clean_json(x):
 def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
     # Try multi-ticker first
     try:
-        df = yf.download([t1, t2], start=start, end=end, progress=False, auto_adjust=True, threads=False)
+        df = yf.download([t1, t2], start=start, end=end,
+                         progress=False, auto_adjust=True, threads=False)
         if not df.empty and isinstance(df.columns, pd.MultiIndex):
             lvl0 = df.columns.get_level_values(0)
             root = "Adj Close" if "Adj Close" in lvl0 else ("Close" if "Close" in lvl0 else lvl0[0])
@@ -139,7 +141,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         det = float(np.linalg.det(cov))
         diff = np.dstack((X, Y)) - mu
         expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
-        norm = 1.0 / (2.0 * np.pi) / max(np.sqrt(max(det, 1e-24)), 1e-12)
+        norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
         Z = norm * np.exp(expo)
         corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
         joint = {
@@ -299,7 +301,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
-# ----- API endpoints -----
+# ---------- API endpoints ----------
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:

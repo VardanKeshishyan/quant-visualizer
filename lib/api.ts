@@ -5,7 +5,7 @@ export type SummaryPayload = {
   ticker2: string;
   start_date: string;      // "YYYY-MM-DD"
   end_date: string;        // "YYYY-MM-DD"
-  initial_invest: number;  // make sure it's a number, not string
+  initial_invest: number;  // must be a number, not string
 };
 
 async function readError(r: Response) {
@@ -45,8 +45,8 @@ export async function downloadExcel(p: SummaryPayload) {
 }
 
 export async function askAssistant(payload: { message: string; context?: any }) {
-  // IMPORTANT: Keep this on Next.js (your Vercel function), not the Python backend
-  const r = await fetch(`/api/assistant`, {
+  // Call the SAME backend to avoid extra Next.js route plumbing
+  const r = await fetch(`${BACKEND}/api/assistant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

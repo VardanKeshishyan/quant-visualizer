@@ -13,7 +13,6 @@ import yfinance as yf
 
 app = FastAPI(title="Quant Backend")
 
-# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -26,7 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- Health ----------------
 @app.get("/")
 def root():
     return {"message": "API is live"}
@@ -35,8 +33,7 @@ def root():
 def health():
     return {"status": "ok"}
 
-# ---------------- AI Assistant (Groq) ----------------
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # set this in Render
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
 
 @app.post("/api/assistant")
 async def assistant(request: Request):
@@ -76,7 +73,6 @@ async def assistant(request: Request):
     except Exception as e:
         return {"text": f"Assistant error: {e}"}
 
-# ---------------- Models ----------------
 class SummaryIn(BaseModel):
     ticker1: str = Field(..., examples=["NVDA"])
     ticker2: str = Field(..., examples=["AMD"])
@@ -84,7 +80,6 @@ class SummaryIn(BaseModel):
     end_date: str = Field(..., examples=["2024-01-01"])
     initial_invest: float = 1000.0
 
-# ---------------- Helpers ----------------
 def _clean_json(x):
     if isinstance(x, float):
         return None if (math.isnan(x) or math.isinf(x)) else float(x)
@@ -110,7 +105,6 @@ def _pick_price_column(df: pd.DataFrame) -> pd.Series:
     for c in ["Adj Close", "Close"]:
         if c in cols:
             return df[c].astype(float)
-    # last resort: first numeric column
     return df.select_dtypes(include=["number"]).iloc[:, 0].astype(float)
 
 def _yf_multi(tickers, start, end) -> pd.DataFrame:
@@ -191,6 +185,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     s2 = [float(v) for v in prices[t2].tolist()]
 
     rets = prices.pct_change().dropna()
+
     spread = rets[t1] - rets[t2]
     if spread.std(ddof=0) == 0 or np.isnan(spread.std(ddof=0)):
         zscores = [0.0] * len(spread)
@@ -198,7 +193,35 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         zscores = ((spread - spread.mean()) / spread.std()).fillna(0).astype(float).tolist()
     z_dates = rets.index.strftime("%Y-%m-%d").tolist()
 
-    # Rolling correlation surface
+    joint = {"x": [], "y": [], "z": [], "corr": 0.0}
+    try:
+        if len(rets) > 10:
+            x_grid = np.linspace(rets[t1].min(), rets[t1].max(), 50)
+            y_grid = np.linspace(rets[t2].min(), rets[t2].max(), 50)
+            X, Y = np.meshgrid(x_grid, y_grid)
+
+            mu = np.array([rets[t1].mean(), rets[t2].mean()], dtype=float)
+            cov = np.array(rets[[t1, t2]].cov().values, dtype=float)
+
+            if np.isfinite(cov).all() and cov.shape == (2, 2):
+                cov = cov + 1e-6 * np.eye(2)
+                inv = np.linalg.inv(cov)
+                det = float(np.linalg.det(cov))
+                diff = np.dstack((X, Y)) - mu
+                expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
+                norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
+                Z = norm * np.exp(expo)
+
+                corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
+                joint = {
+                    "x": x_grid.astype(float).tolist(),
+                    "y": y_grid.astype(float).tolist(),
+                    "z": Z.astype(float).tolist(),
+                    "corr": corr,
+                }
+    except Exception as e:
+        print("Joint distribution error:", e)
+
     windows = [30, 60, 90]
     z_corr = []
     for w in windows:
@@ -208,7 +231,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     z_list = [[(None if (v is None or not np.isfinite(v)) else float(v)) for v in row] for row in z.tolist()]
     rolling_surface = {"x_index": list(range(len(rets))), "windows": windows, "z": z_list}
 
-    # Simple pairs backtest stats
     cum = (1 + rets).cumprod() - 1
     last1 = float(cum[t1].iloc[-1])
     last2 = float(cum[t2].iloc[-1])
@@ -223,9 +245,10 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     net = float(long_profit + short_profit)
     risk = float(rets[[t1, t2]].std().mean() * np.sqrt(252))
 
-    result = {
+    return _clean_json({
         "price_plot": {"dates": dates, "series1": s1, "series2": s2, "ticker1": t1, "ticker2": t2},
         "zscore_plot": {"dates": z_dates, "zscores": zscores},
+        "joint_3d": joint,
         "rolling_corr_surface": rolling_surface,
         "backtest": [
             {"Metric": "Outperformer", "Value": outperformer},
@@ -233,8 +256,8 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
             {"Metric": "Net Profit", "Value": f"{net:.2f}"},
             {"Metric": "Annualized Volatility", "Value": f"{risk*100:.2f}%"},
         ],
-    }
-    return _clean_json(result)
+    })
+
 
 def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, capital: float):
     from dateutil.relativedelta import relativedelta
@@ -251,7 +274,6 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
         out_name, out_pct = t2, r2 * 100
         under_name, under_pct = t1, r1 * 100
 
-    # try to reuse already computed risk/net in data
     try:
         risk_str = next(x["Value"] for x in data["backtest"] if x["Metric"] == "Annualized Volatility")
     except StopIteration:
@@ -345,7 +367,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
-# ---------------- API endpoints ----------------
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:
@@ -399,3 +420,4 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+

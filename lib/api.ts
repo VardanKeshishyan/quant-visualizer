@@ -3,8 +3,8 @@ export const BACKEND = "https://quant-visualizer-6.onrender.com";
 export type SummaryPayload = {
   ticker1: string;
   ticker2: string;
-  start_date: string;      // "YYYY-MM-DD"
-  end_date: string;        // "YYYY-MM-DD"
+  start_date: string;   
+  end_date: string;     
   initial_invest: number;  // number, not string
 };
 
@@ -59,3 +59,4 @@ export async function askAssistant(payload: { message: string; context?: any }) 
   }
   return (await r.json()) as { text: string };
 }
+

@@ -44,7 +44,6 @@ export async function downloadExcel(p: SummaryPayload) {
 }
 
 export async function askAssistant(payload: { message: string; context?: any }) {
-  // Call the Python backend also for assistant to keep it simple
   const r = await fetch(`${BACKEND}/api/assistant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

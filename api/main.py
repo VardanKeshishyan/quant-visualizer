@@ -11,11 +11,10 @@ import yfinance as yf
 
 app = FastAPI(title="Quant Backend")
 
-# CORS (wide open so Vercel/localhost both work)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # allow all origins
-    allow_credentials=False,   # must be False when origins is "*"
+    allow_origins=["*"],      
+    allow_credentials=False,  
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -28,7 +27,6 @@ def root():
 def health():
     return {"status": "ok"}
 
-# Simple placeholder assistant
 @app.post("/api/assistant")
 async def assistant(request: Request):
     payload = await request.json()
@@ -92,7 +90,6 @@ def _yf_multi(tickers, start, end) -> pd.DataFrame:
     return df
 
 def _yf_single(ticker, start, end) -> pd.Series:
-    # 1) download
     df = yf.download(
         tickers=ticker,
         start=start,
@@ -107,7 +104,6 @@ def _yf_single(ticker, start, end) -> pd.Series:
     if df is not None and not df.empty:
         return _pick_price_column(df).rename(ticker)
 
-    # 2) Ticker().history fallback
     th = yf.Ticker(ticker).history(
         start=start,
         end=end,
@@ -121,7 +117,6 @@ def _yf_single(ticker, start, end) -> pd.Series:
     raise ValueError(f"No data returned for {ticker}")
 
 def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
-    # Try multi first
     try:
         multi = _yf_multi([t1, t2], start, end)
         if not multi.empty:
@@ -132,7 +127,6 @@ def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
     except Exception:
         pass
 
-    # Fallback: fetch individually
     s1 = _yf_single(t1, start, end)
     s2 = _yf_single(t2, start, end)
     prices = pd.concat([s1, s2], axis=1).dropna()
@@ -329,7 +323,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
-# --- API endpoints ---
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:
@@ -383,3 +376,4 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+

@@ -1,24 +1,32 @@
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel, Field
 
 import io
+import os
 import math
+import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 app = FastAPI(title="Quant Backend")
 
+# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      
-    allow_credentials=False,  
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------- Health ----------------
 @app.get("/")
 def root():
     return {"message": "API is live"}
@@ -27,12 +35,48 @@ def root():
 def health():
     return {"status": "ok"}
 
+# ---------------- AI Assistant (Groq) ----------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")  # set this in Render
+
 @app.post("/api/assistant")
 async def assistant(request: Request):
     payload = await request.json()
-    msg = payload.get("message", "")
-    return {"text": f"(Echo) You said: {msg}"}
+    msg = (payload.get("message") or "").strip()
+    ctx = payload.get("context")
 
+    if not msg:
+        return {"text": "Please type something."}
+
+    prompt = (
+        "You are an assistant for a stock analytics dashboard that shows:\n"
+        "- price plot for two tickers\n- z-score of daily spread\n"
+        "- rolling correlation surface\n- a simple pairs backtest\n"
+        "Keep answers concise (<=100 words). If user asks about specific tickers, "
+        "explain how to interpret the charts.\n\n"
+        f"Context (JSON-ish, optional): {ctx}\n\nUser: {msg}"
+    )
+
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {"role": "system", "content": "Be helpful, brief, and practical."},
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        reply = data["choices"][0]["message"]["content"]
+        return {"text": reply}
+    except Exception as e:
+        return {"text": f"Assistant error: {e}"}
+
+# ---------------- Models ----------------
 class SummaryIn(BaseModel):
     ticker1: str = Field(..., examples=["NVDA"])
     ticker2: str = Field(..., examples=["AMD"])
@@ -40,6 +84,7 @@ class SummaryIn(BaseModel):
     end_date: str = Field(..., examples=["2024-01-01"])
     initial_invest: float = 1000.0
 
+# ---------------- Helpers ----------------
 def _clean_json(x):
     if isinstance(x, float):
         return None if (math.isnan(x) or math.isinf(x)) else float(x)
@@ -65,6 +110,7 @@ def _pick_price_column(df: pd.DataFrame) -> pd.Series:
     for c in ["Adj Close", "Close"]:
         if c in cols:
             return df[c].astype(float)
+    # last resort: first numeric column
     return df.select_dtypes(include=["number"]).iloc[:, 0].astype(float)
 
 def _yf_multi(tickers, start, end) -> pd.DataFrame:
@@ -117,6 +163,7 @@ def _yf_single(ticker, start, end) -> pd.Series:
     raise ValueError(f"No data returned for {ticker}")
 
 def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
+    # try multi
     try:
         multi = _yf_multi([t1, t2], start, end)
         if not multi.empty:
@@ -126,7 +173,7 @@ def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
                 return multi.astype(float)
     except Exception:
         pass
-
+    # single fallback
     s1 = _yf_single(t1, start, end)
     s2 = _yf_single(t2, start, end)
     prices = pd.concat([s1, s2], axis=1).dropna()
@@ -151,31 +198,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         zscores = ((spread - spread.mean()) / spread.std()).fillna(0).astype(float).tolist()
     z_dates = rets.index.strftime("%Y-%m-%d").tolist()
 
-    joint = {"x": [], "y": [], "z": [], "corr": 0.0}
-    try:
-        x_grid = np.linspace(rets[t1].min(), rets[t1].max(), 50)
-        y_grid = np.linspace(rets[t2].min(), rets[t2].max(), 50)
-        X, Y = np.meshgrid(x_grid, y_grid)
-        mu = np.array([rets[t1].mean(), rets[t2].mean()], dtype=float)
-        cov = np.array(rets[[t1, t2]].cov().values, dtype=float)
-        if np.isfinite(cov).all():
-            cov = cov + 1e-12 * np.eye(2)
-            inv = np.linalg.inv(cov)
-            det = float(np.linalg.det(cov))
-            diff = np.dstack((X, Y)) - mu
-            expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
-            norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
-            Z = norm * np.exp(expo)
-            corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
-            joint = {
-                "x": x_grid.astype(float).tolist(),
-                "y": y_grid.astype(float).tolist(),
-                "z": Z.astype(float).tolist(),
-                "corr": corr,
-            }
-    except Exception:
-        pass
-
+    # Rolling correlation surface
     windows = [30, 60, 90]
     z_corr = []
     for w in windows:
@@ -185,6 +208,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     z_list = [[(None if (v is None or not np.isfinite(v)) else float(v)) for v in row] for row in z.tolist()]
     rolling_surface = {"x_index": list(range(len(rets))), "windows": windows, "z": z_list}
 
+    # Simple pairs backtest stats
     cum = (1 + rets).cumprod() - 1
     last1 = float(cum[t1].iloc[-1])
     last2 = float(cum[t2].iloc[-1])
@@ -202,7 +226,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     result = {
         "price_plot": {"dates": dates, "series1": s1, "series2": s2, "ticker1": t1, "ticker2": t2},
         "zscore_plot": {"dates": z_dates, "zscores": zscores},
-        "joint_3d": joint,
         "rolling_corr_surface": rolling_surface,
         "backtest": [
             {"Metric": "Outperformer", "Value": outperformer},
@@ -228,6 +251,7 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
         out_name, out_pct = t2, r2 * 100
         under_name, under_pct = t1, r1 * 100
 
+    # try to reuse already computed risk/net in data
     try:
         risk_str = next(x["Value"] for x in data["backtest"] if x["Metric"] == "Annualized Volatility")
     except StopIteration:
@@ -277,7 +301,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         return df.to_csv(index=False).encode("utf-8")
 
     header, body = rows[0], rows[1:]
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Backtest Report"
@@ -311,7 +334,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         r += 1
 
     for col in ws.columns:
-        from openpyxl.cell import MergedCell
         cells = [cell for cell in col if not isinstance(cell, MergedCell)]
         if not cells:
             continue
@@ -323,6 +345,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
+# ---------------- API endpoints ----------------
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:
@@ -376,4 +399,3 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
-

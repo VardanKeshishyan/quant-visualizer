@@ -18,40 +18,22 @@ async function readError(r: Response) {
 }
 
 export async function runSummary(p: SummaryPayload) {
-  // sanity: clean payload (avoids "Incorrect input")
-  const clean: SummaryPayload = {
-    ticker1: (p.ticker1 || "").trim().toUpperCase(),
-    ticker2: (p.ticker2 || "").trim().toUpperCase(),
-    start_date: p.start_date || "2022-01-01",
-    end_date: p.end_date || new Date().toISOString().slice(0, 10),
-    initial_invest: Number(p.initial_invest) || 1000,
-  };
-
   const r = await fetch(`${BACKEND}/api/summary`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(clean),
+    body: JSON.stringify(p),
   });
   if (!r.ok) throw new Error(await readError(r));
   return r.json();
 }
 
 export async function downloadExcel(p: SummaryPayload) {
-  const clean: SummaryPayload = {
-    ticker1: (p.ticker1 || "").trim().toUpperCase(),
-    ticker2: (p.ticker2 || "").trim().toUpperCase(),
-    start_date: p.start_date || "2022-01-01",
-    end_date: p.end_date || new Date().toISOString().slice(0, 10),
-    initial_invest: Number(p.initial_invest) || 1000,
-  };
-
   const r = await fetch(`${BACKEND}/api/excel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(clean),
+    body: JSON.stringify(p),
   });
   if (!r.ok) throw new Error(await readError(r));
-
   const blob = await r.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -62,11 +44,19 @@ export async function downloadExcel(p: SummaryPayload) {
 }
 
 export async function askAssistant(payload: { message: string; context?: any }) {
+  // Call the Python backend also for assistant to keep it simple
   const r = await fetch(`${BACKEND}/api/assistant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) throw new Error(await readError(r));
+  if (!r.ok) {
+    const txt = await r.text();
+    try {
+      const j = JSON.parse(txt);
+      if (j?.error) throw new Error(j.error);
+    } catch {}
+    throw new Error(txt || "Assistant request failed");
+  }
   return (await r.json()) as { text: string };
 }

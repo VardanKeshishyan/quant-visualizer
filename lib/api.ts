@@ -5,7 +5,7 @@ export type SummaryPayload = {
   ticker2: string;
   start_date: string;   
   end_date: string;     
-  initial_invest: number;  // number, not string
+  initial_invest: number;
 };
 
 async function readError(r: Response) {
@@ -59,4 +59,5 @@ export async function askAssistant(payload: { message: string; context?: any }) 
   }
   return (await r.json()) as { text: string };
 }
+
 

@@ -10,9 +10,7 @@ import math
 
 app = FastAPI(title="Quant Backend")
 
-# ---------- CORS ----------
-# Allow localhost and your Vercel deployment(s).
-# Remove the regex if you want to lock it to your exact URL only.
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -355,3 +353,4 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+

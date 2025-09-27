@@ -8,26 +8,17 @@ import math
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import requests
 
 app = FastAPI(title="Quant Backend")
 
+# CORS (wide open so Vercel/localhost both work)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # allow all
+    allow_origins=["*"],       # allow all origins
     allow_credentials=False,   # must be False when origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- Shared HTTP session with UA for yfinance ---
-SESSION = requests.Session()
-SESSION.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/123.0 Safari/537.36"
-    )
-})
 
 @app.get("/")
 def root():
@@ -76,7 +67,6 @@ def _pick_price_column(df: pd.DataFrame) -> pd.Series:
     for c in ["Adj Close", "Close"]:
         if c in cols:
             return df[c].astype(float)
-    # fallback to first numeric col
     return df.select_dtypes(include=["number"]).iloc[:, 0].astype(float)
 
 def _yf_multi(tickers, start, end) -> pd.DataFrame:
@@ -89,8 +79,6 @@ def _yf_multi(tickers, start, end) -> pd.DataFrame:
         interval="1d",
         progress=False,
         repair=True,
-        session=SESSION,
-        # timeout is supported indirectly via requests
         threads=False,
     )
     if df is None or df.empty:
@@ -101,7 +89,6 @@ def _yf_multi(tickers, start, end) -> pd.DataFrame:
         prices = df.loc[:, (root, slice(None))]
         prices.columns = prices.columns.droplevel(0)
         return prices
-    # single-level cols (rare with multi)
     return df
 
 def _yf_single(ticker, start, end) -> pd.Series:
@@ -115,14 +102,13 @@ def _yf_single(ticker, start, end) -> pd.Series:
         interval="1d",
         progress=False,
         repair=True,
-        session=SESSION,
         threads=False,
     )
     if df is not None and not df.empty:
         return _pick_price_column(df).rename(ticker)
 
     # 2) Ticker().history fallback
-    th = yf.Ticker(ticker, session=SESSION).history(
+    th = yf.Ticker(ticker).history(
         start=start,
         end=end,
         auto_adjust=True,
@@ -331,6 +317,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         r += 1
 
     for col in ws.columns:
+        from openpyxl.cell import MergedCell
         cells = [cell for cell in col if not isinstance(cell, MergedCell)]
         if not cells:
             continue
@@ -396,4 +383,3 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
-

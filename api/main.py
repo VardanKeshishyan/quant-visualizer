@@ -12,7 +12,6 @@ import requests
 
 app = FastAPI(title="Quant Backend")
 
-# --- CORS: keep it simple & permissive ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],       # allow all
@@ -397,3 +396,4 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+

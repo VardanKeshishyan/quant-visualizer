@@ -106,7 +106,7 @@ export default function AboutPage() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground mb-4">
-                <strong>Technology Stack:</strong> Next.js, React, TypeScript, Tailwind CSS, Recharts for
+                <strong>Technology Stack:</strong> Python, Next.js, React, TypeScript, Tailwind CSS, Recharts for
                 visualizations, and various financial data APIs. Built a Next.js + FastAPI application to analyze stock pair trading strategies.
               </p>
               <p className="text-muted-foreground">

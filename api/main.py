@@ -1,32 +1,35 @@
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from fastapi.responses import Response
-import pandas as pd
-import numpy as np
-import yfinance as yf
+from pydantic import BaseModel, Field
+
 import io
 import math
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import requests
 
 app = FastAPI(title="Quant Backend")
 
-
+# --- CORS: keep it simple & permissive ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://quant-visualizer.vercel.app",
-        # add any other exact Vercel preview URL if you want to be strict
-        # "https://quant-visualizer-xxxxxxxx.vercel.app",
-    ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_credentials=True,
+    allow_origins=["*"],       # allow all
+    allow_credentials=False,   # must be False when origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------- Health / Root ----------
+# --- Shared HTTP session with UA for yfinance ---
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+    )
+})
+
 @app.get("/")
 def root():
     return {"message": "API is live"}
@@ -35,14 +38,13 @@ def root():
 def health():
     return {"status": "ok"}
 
-# ---------- Assistant (echo) ----------
+# Simple placeholder assistant
 @app.post("/api/assistant")
 async def assistant(request: Request):
     payload = await request.json()
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
-# ---------- Models ----------
 class SummaryIn(BaseModel):
     ticker1: str = Field(..., examples=["NVDA"])
     ticker2: str = Field(..., examples=["AMD"])
@@ -50,7 +52,6 @@ class SummaryIn(BaseModel):
     end_date: str = Field(..., examples=["2024-01-01"])
     initial_invest: float = 1000.0
 
-# ---------- Helpers ----------
 def _clean_json(x):
     if isinstance(x, float):
         return None if (math.isnan(x) or math.isinf(x)) else float(x)
@@ -67,53 +68,99 @@ def _clean_json(x):
         return _clean_json(x.tolist())
     return x
 
+def _pick_price_column(df: pd.DataFrame) -> pd.Series:
+    if df is None or df.empty:
+        raise ValueError("No data returned")
+    if isinstance(df, pd.Series):
+        return df.astype(float)
+    cols = list(df.columns)
+    for c in ["Adj Close", "Close"]:
+        if c in cols:
+            return df[c].astype(float)
+    # fallback to first numeric col
+    return df.select_dtypes(include=["number"]).iloc[:, 0].astype(float)
+
+def _yf_multi(tickers, start, end) -> pd.DataFrame:
+    df = yf.download(
+        tickers=tickers,
+        start=start,
+        end=end,
+        auto_adjust=True,
+        actions=False,
+        interval="1d",
+        progress=False,
+        repair=True,
+        session=SESSION,
+        # timeout is supported indirectly via requests
+        threads=False,
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if isinstance(df.columns, pd.MultiIndex):
+        lvl0 = df.columns.get_level_values(0)
+        root = "Adj Close" if "Adj Close" in lvl0 else ("Close" if "Close" in lvl0 else lvl0[0])
+        prices = df.loc[:, (root, slice(None))]
+        prices.columns = prices.columns.droplevel(0)
+        return prices
+    # single-level cols (rare with multi)
+    return df
+
+def _yf_single(ticker, start, end) -> pd.Series:
+    # 1) download
+    df = yf.download(
+        tickers=ticker,
+        start=start,
+        end=end,
+        auto_adjust=True,
+        actions=False,
+        interval="1d",
+        progress=False,
+        repair=True,
+        session=SESSION,
+        threads=False,
+    )
+    if df is not None and not df.empty:
+        return _pick_price_column(df).rename(ticker)
+
+    # 2) Ticker().history fallback
+    th = yf.Ticker(ticker, session=SESSION).history(
+        start=start,
+        end=end,
+        auto_adjust=True,
+        actions=False,
+        interval="1d",
+    )
+    if th is not None and not th.empty:
+        return _pick_price_column(th).rename(ticker)
+
+    raise ValueError(f"No data returned for {ticker}")
+
 def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
-    # Try multi-ticker first
+    # Try multi first
     try:
-        df = yf.download([t1, t2], start=start, end=end,
-                         progress=False, auto_adjust=True, threads=False)
-        if not df.empty and isinstance(df.columns, pd.MultiIndex):
-            lvl0 = df.columns.get_level_values(0)
-            root = "Adj Close" if "Adj Close" in lvl0 else ("Close" if "Close" in lvl0 else lvl0[0])
-            prices = df.loc[:, (root, slice(None))]
-            prices.columns = prices.columns.droplevel(0)
-            prices = prices[[c for c in prices.columns if c in [t1, t2]]].dropna()
-            if not prices.empty and set([t1, t2]).issubset(prices.columns):
-                if prices.shape[0] < 5:
-                    raise ValueError("Not enough historical rows; widen the date range.")
-                return prices.astype(float)
+        multi = _yf_multi([t1, t2], start, end)
+        if not multi.empty:
+            keep = [c for c in multi.columns if c in [t1, t2]]
+            multi = multi[keep].dropna()
+            if multi.shape[0] >= 5 and set([t1, t2]).issubset(multi.columns):
+                return multi.astype(float)
     except Exception:
         pass
 
-    # Fallback to per-ticker fetch
-    try:
-        p1 = yf.download(t1, start=start, end=end, progress=False, auto_adjust=True, threads=False)
-        p2 = yf.download(t2, start=start, end=end, progress=False, auto_adjust=True, threads=False)
-    except Exception as e:
-        raise ValueError(f"yfinance error while fetching {t1},{t2}: {e}")
-
-    def pick_price_column(df: pd.DataFrame) -> pd.Series:
-        if df.empty:
-            raise ValueError("No data returned")
-        if isinstance(df, pd.Series):
-            return df.astype(float)
-        cols = list(df.columns)
-        for c in ["Adj Close", "Close"]:
-            if c in cols:
-                return df[c].astype(float)
-        return df.iloc[:, 0].astype(float)
-
-    s1 = pick_price_column(p1).rename(t1)
-    s2 = pick_price_column(p2).rename(t2)
+    # Fallback: fetch individually
+    s1 = _yf_single(t1, start, end)
+    s2 = _yf_single(t2, start, end)
     prices = pd.concat([s1, s2], axis=1).dropna()
     if prices.shape[0] < 5:
-        raise ValueError("Not enough historical rows; widen the date range.")
+        raise ValueError(
+            f"Not enough historical rows after fetching {t1},{t2} "
+            f"({prices.shape[0]} rows). Try widening the date range."
+        )
     return prices.astype(float)
 
 def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     prices = fetch_prices(t1, t2, start, end)
     dates = prices.index.strftime("%Y-%m-%d").tolist()
-
     s1 = [float(v) for v in prices[t1].tolist()]
     s2 = [float(v) for v in prices[t2].tolist()]
 
@@ -132,22 +179,21 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         X, Y = np.meshgrid(x_grid, y_grid)
         mu = np.array([rets[t1].mean(), rets[t2].mean()], dtype=float)
         cov = np.array(rets[[t1, t2]].cov().values, dtype=float)
-        if not np.isfinite(cov).all():
-            raise ValueError("bad cov")
-        cov = cov + 1e-12 * np.eye(2)
-        inv = np.linalg.inv(cov)
-        det = float(np.linalg.det(cov))
-        diff = np.dstack((X, Y)) - mu
-        expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
-        norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
-        Z = norm * np.exp(expo)
-        corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
-        joint = {
-            "x": x_grid.astype(float).tolist(),
-            "y": y_grid.astype(float).tolist(),
-            "z": Z.astype(float).tolist(),
-            "corr": corr,
-        }
+        if np.isfinite(cov).all():
+            cov = cov + 1e-12 * np.eye(2)
+            inv = np.linalg.inv(cov)
+            det = float(np.linalg.det(cov))
+            diff = np.dstack((X, Y)) - mu
+            expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
+            norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
+            Z = norm * np.exp(expo)
+            corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
+            joint = {
+                "x": x_grid.astype(float).tolist(),
+                "y": y_grid.astype(float).tolist(),
+                "z": Z.astype(float).tolist(),
+                "corr": corr,
+            }
     except Exception:
         pass
 
@@ -157,8 +203,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         r = rets[t1].rolling(w).corr(rets[t2]).to_numpy(dtype=float)
         z_corr.append(r)
     z = np.vstack(z_corr) if z_corr else np.empty((0, 0))
-    z_list = z.tolist()
-    z_list = [[(None if (v is None or not np.isfinite(v)) else float(v)) for v in row] for row in z_list]
+    z_list = [[(None if (v is None or not np.isfinite(v)) else float(v)) for v in row] for row in z.tolist()]
     rolling_surface = {"x_index": list(range(len(rets))), "windows": windows, "z": z_list}
 
     cum = (1 + rets).cumprod() - 1
@@ -190,7 +235,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     return _clean_json(result)
 
 def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, capital: float):
-    import pandas as pd
     from dateutil.relativedelta import relativedelta
 
     s1 = pd.Series(data["price_plot"]["series1"], dtype=float)
@@ -239,7 +283,6 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
     return [header] + body
 
 def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: float) -> bytes:
-    import pandas as pd
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, Border, Side, PatternFill
@@ -255,6 +298,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         return df.to_csv(index=False).encode("utf-8")
 
     header, body = rows[0], rows[1:]
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Backtest Report"
@@ -299,7 +343,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
-# ---------- API endpoints ----------
+# --- API endpoints ---
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:
@@ -353,4 +397,3 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
-

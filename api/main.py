@@ -1,9 +1,7 @@
-
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.responses import Response
-from fastapi.responses import JSONResponse
 
 import pandas as pd
 import numpy as np
@@ -13,34 +11,39 @@ import math
 
 app = FastAPI(title="Quant Backend")
 
+# ----- CORS -----
+# Allow localhost and all *.vercel.app (plus your exact deployed URL if you want to be strict)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        # add your exact Vercel site if you prefer strict allowlist:
+        # "https://quant-visualizer-XXXXX.vercel.app",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",   # allows any vercel.app frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ----- Health / Root -----
 @app.get("/")
 def root():
     return {"message": "API is live"}
-    
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+# ----- Assistant echo (simple placeholder) -----
 @app.post("/api/assistant")
 async def assistant(request: Request):
     payload = await request.json()
     msg = payload.get("message", "")
     return {"text": f"(Echo) You said: {msg}"}
 
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],         
-    allow_credentials=True,
-    allow_methods=["*"],         
-    allow_headers=["*"],
-)
-
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str):
-    return JSONResponse(content={"ok": True})
-
-
+# ----- Models -----
 class SummaryIn(BaseModel):
     ticker1: str = Field(..., examples=["NVDA"])
     ticker2: str = Field(..., examples=["AMD"])
@@ -48,7 +51,7 @@ class SummaryIn(BaseModel):
     end_date: str = Field(..., examples=["2024-01-01"])
     initial_invest: float = 1000.0
 
-
+# ----- Helpers -----
 def _clean_json(x):
     if isinstance(x, float):
         return None if (math.isnan(x) or math.isinf(x)) else float(x)
@@ -65,12 +68,10 @@ def _clean_json(x):
         return _clean_json(x.tolist())
     return x
 
-
 def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
-    
+    # Try multi-ticker first
     try:
-        df = yf.download([t1, t2], start=start, end=end,
-                         progress=False, auto_adjust=True, threads=False)
+        df = yf.download([t1, t2], start=start, end=end, progress=False, auto_adjust=True, threads=False)
         if not df.empty and isinstance(df.columns, pd.MultiIndex):
             lvl0 = df.columns.get_level_values(0)
             root = "Adj Close" if "Adj Close" in lvl0 else ("Close" if "Close" in lvl0 else lvl0[0])
@@ -84,7 +85,7 @@ def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
     except Exception:
         pass
 
-    
+    # Fallback to per-ticker fetch
     try:
         p1 = yf.download(t1, start=start, end=end, progress=False, auto_adjust=True, threads=False)
         p2 = yf.download(t2, start=start, end=end, progress=False, auto_adjust=True, threads=False)
@@ -109,7 +110,6 @@ def fetch_prices(t1: str, t2: str, start: str, end: str) -> pd.DataFrame:
         raise ValueError("Not enough historical rows; widen the date range.")
     return prices.astype(float)
 
-
 def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     prices = fetch_prices(t1, t2, start, end)
     dates = prices.index.strftime("%Y-%m-%d").tolist()
@@ -125,7 +125,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         zscores = ((spread - spread.mean()) / spread.std()).fillna(0).astype(float).tolist()
     z_dates = rets.index.strftime("%Y-%m-%d").tolist()
 
-    
     joint = {"x": [], "y": [], "z": [], "corr": 0.0}
     try:
         x_grid = np.linspace(rets[t1].min(), rets[t1].max(), 50)
@@ -140,7 +139,7 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
         det = float(np.linalg.det(cov))
         diff = np.dstack((X, Y)) - mu
         expo = -0.5 * np.einsum("...i,ij,...j", diff, inv, diff)
-        norm = 1.0 / (2.0 * np.pi * np.sqrt(max(det, 1e-24)))
+        norm = 1.0 / (2.0 * np.pi) / max(np.sqrt(max(det, 1e-24)), 1e-12)
         Z = norm * np.exp(expo)
         corr = float(np.corrcoef(rets[t1].fillna(0), rets[t2].fillna(0))[0, 1])
         joint = {
@@ -152,7 +151,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     except Exception:
         pass
 
-    
     windows = [30, 60, 90]
     z_corr = []
     for w in windows:
@@ -163,7 +161,6 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     z_list = [[(None if (v is None or not np.isfinite(v)) else float(v)) for v in row] for row in z_list]
     rolling_surface = {"x_index": list(range(len(rets))), "windows": windows, "z": z_list}
 
-    
     cum = (1 + rets).cumprod() - 1
     last1 = float(cum[t1].iloc[-1])
     last2 = float(cum[t2].iloc[-1])
@@ -192,22 +189,10 @@ def compute_summary(t1: str, t2: str, start: str, end: str, capital: float):
     }
     return _clean_json(result)
 
-
 def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, capital: float):
-    """
-    Build the exact 'Metric / Value' rows you had in Streamlit:
-      - Stock Pair
-      - Outperforming Asset (xx.xx%)
-      - Underperforming Asset (xx.xx%)
-      - Net Profit   (Long $X A, Short $X B: $Z)
-      - Annualized Volatility (Risk Measure)
-      - Time Period (years/months)
-    """
     import pandas as pd
-    import numpy as np
     from dateutil.relativedelta import relativedelta
 
-    
     s1 = pd.Series(data["price_plot"]["series1"], dtype=float)
     s2 = pd.Series(data["price_plot"]["series2"], dtype=float)
     r1 = (float(s1.iloc[-1]) / float(s1.iloc[0]) - 1.0) if len(s1) >= 2 else 0.0
@@ -220,7 +205,6 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
         out_name, out_pct = t2, r2 * 100
         under_name, under_pct = t1, r1 * 100
 
-    
     try:
         risk_str = next(x["Value"] for x in data["backtest"] if x["Metric"] == "Annualized Volatility")
     except StopIteration:
@@ -228,14 +212,11 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
         risk = float(rets.std().mean() * np.sqrt(252)) * 100.0
         risk_str = f"{risk:.2f}%"
 
-    
     try:
         net_profit_val = float(next(x["Value"] for x in data["backtest"] if x["Metric"] == "Net Profit"))
     except Exception:
-        
         net_profit_val = capital * (r1 - r2)
 
-    
     d1 = pd.to_datetime(start)
     d2 = pd.to_datetime(end)
     rd = relativedelta(d2, d1)
@@ -257,21 +238,8 @@ def _excel_rows_from_data(data: dict, t1: str, t2: str, start: str, end: str, ca
     ]
     return [header] + body
 
-
 def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: float) -> bytes:
-    """
-    Creates a styled XLSX identical in spirit to your Streamlit 'create_excel_report':
-    - Merged green title row with white bold text
-    - White bold headers on green fill
-    - Thin borders around all cells
-    - Wrapped text for values
-    - Auto column widths (ignore merged cells)
-    Falls back to CSV if openpyxl is unavailable.
-    """
-    import io
     import pandas as pd
-
-    
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Font, Border, Side, PatternFill
@@ -287,12 +255,10 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         return df.to_csv(index=False).encode("utf-8")
 
     header, body = rows[0], rows[1:]
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Backtest Report"
 
-    
     title_text = f"Pairs Trading Report ({t1} vs {t2})"
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(header))
     title_cell = ws.cell(row=1, column=1, value=title_text)
@@ -300,7 +266,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     title_cell.fill = PatternFill(start_color="00C9A7", end_color="00C9A7", fill_type="solid")
 
-    
     header_font = Font(bold=True, color="FFFFFF", size=12, name="Calibri")
     header_fill = PatternFill(start_color="00C9A7", end_color="00C9A7", fill_type="solid")
     thin = Side(style="thin")
@@ -313,7 +278,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
         cell.fill = header_fill
         cell.border = border
 
-    
     r = 3
     for row in body:
         for c_idx, value in enumerate(row, 1):
@@ -323,7 +287,6 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
             cell.border = border
         r += 1
 
-    
     for col in ws.columns:
         cells = [cell for cell in col if not isinstance(cell, MergedCell)]
         if not cells:
@@ -336,12 +299,7 @@ def build_excel(data: dict, t1: str, t2: str, start: str, end: str, capital: flo
     stream.seek(0)
     return stream.read()
 
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
+# ----- API endpoints -----
 @app.post("/api/summary")
 def api_summary(body: SummaryIn):
     try:
@@ -353,7 +311,6 @@ def api_summary(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"summary_error: {e}")
-
 
 @app.get("/api/summary")
 def api_summary_get(
@@ -373,37 +330,26 @@ def api_summary_get(
 @app.post("/api/excel")
 def api_excel(body: SummaryIn):
     try:
-        
         data = compute_summary(
             body.ticker1.upper(), body.ticker2.upper(),
             body.start_date, body.end_date, body.initial_invest
         )
-
         content = build_excel(
             data,
             body.ticker1.upper(), body.ticker2.upper(),
             body.start_date, body.end_date, body.initial_invest
         )
-
-        
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        if content[:6] == b"Metric" or content[:5] == b"Metric":  
+        if content[:6] == b"Metric" or content[:5] == b"Metric":
             mime = "text/csv"
-
         ext = "xlsx" if mime != "text/csv" else "csv"
         filename = f"backtest_{body.ticker1.upper()}_{body.ticker2.upper()}.{ext}"
-
-        return Response(content=content, media_type=mime,
-                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
-
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
-
-
-
-
-
-
-

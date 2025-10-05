@@ -12,7 +12,6 @@ import { AssistantBubble } from "@/components/ui/assistant-bubble"
 export const metadata: Metadata = {
   title: "Quant Visualizer - Financial Analytics Dashboard",
   description: "Advanced quantitative analysis and visualization for stock pairs trading",
-  generator: "v0.app",
 }
 
 export default function RootLayout({

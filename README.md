@@ -1,6 +1,6 @@
 # Quant Visualizer
 
-Check it out (First time visitors: wait 5–10 sec for analysis): https://quant-visualizer.vercel.app/
+Check it out (First time visitors: wait 5–10 sec for analysis): (https://quant-visualizer.vardan.app/)
 
 Quant Visualizer is a web application that demonstrates one of the classic quantitative finance ideas **pairs trading**.  
 The app lets you pick two stocks, analyze how closely they move together, and backtest a simple long/short strategy.

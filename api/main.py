@@ -18,6 +18,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://quant-visualizer.vardan.app",
+
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=False,
@@ -420,4 +422,5 @@ def api_excel(body: SummaryIn):
         raise HTTPException(status_code=400, detail=f"{e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"excel_error: {e}")
+
 
